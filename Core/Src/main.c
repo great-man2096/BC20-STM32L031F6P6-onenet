@@ -83,8 +83,10 @@ int MIPLOBSERVERSP_3336;
 char * MIPLDISCOVER;
 uint8_t iot_flag = 0;
 uint8_t GPS_flag = 0;
-char iot_info[127];
+uint8_t SHUT_DOWN_FLAG = 0;
+char iot_info[256];
 char iot_info2[100];
+// uint8_t test[256];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -144,11 +146,16 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_RESET);  //点亮电源指示灯
   HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_SET); //让电路板保持上电
+  while(HAL_GPIO_ReadPin(SHUT_DOWN_GPIO_Port, SHUT_DOWN_Pin) == 0);
 
   //给NB20模组开机
   HAL_GPIO_WritePin(NB_PWR_GPIO_Port, NB_PWR_Pin, GPIO_PIN_SET);
   HAL_Delay(600);
   HAL_GPIO_WritePin(NB_PWR_GPIO_Port, NB_PWR_Pin, GPIO_PIN_RESET);
+  //给NB20模组重启
+  HAL_GPIO_WritePin(NB_PWR_GPIO_Port, NB_RST_Pin, GPIO_PIN_SET);
+  HAL_Delay(60);
+  HAL_GPIO_WritePin(NB_PWR_GPIO_Port, NB_RST_Pin, GPIO_PIN_RESET);
 
   HAL_Delay(30000); //等待BC20连接基站
 
@@ -203,6 +210,7 @@ int main(void)
 
   Set_Cmd2NB("AT+MIPLCREATE\r\n",15,"+MIPLCREATE: 0");  //创建通信套件实例。
   Set_Cmd2NB("AT+MIPLADDOBJ=0,3320,1,\"1\",1,0\r\n",32,"OK"); //添加 LwM2M 对象。
+  // Set_Cmd2NB("AT+MIPLADDOBJ=0,3336,1,\"1\",4,0\r\n",32,"OK"); //添加 LwM2M 对象。
   Set_Cmd2NB("AT+MIPLADDOBJ=0,3336,1,\"1\",3,0\r\n",32,"OK"); //添加 LwM2M 对象。
   Set_Cmd2NB("AT+MIPLOPEN=0,86400\r\n",21,"OK");  //向 OneNET 发送注册请求。
 
@@ -256,7 +264,7 @@ int main(void)
       HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_RESET); //让电路板掉电
     }
 
-    HAL_Delay(1);
+    HAL_Delay(0);
     main_count++;
     if (main_count > 5000)
     {
@@ -278,17 +286,19 @@ int main(void)
         else if (BAT_VALUE < 3.0)
         {
           BAT_Q = 0;
+          SHUT_DOWN_FLAG++;
+          if (SHUT_DOWN_FLAG>3)
+            HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_RESET); //软件关机
         }
         else
         {
           BAT_Q = 100 - (4.1 - BAT_VALUE) * (100/(4.1-3.0));
         }
         
-        // memset(iot_info2, 0, 127);
         //电池电量变化上传
         if (BAT_Q_LAST != BAT_Q)
         {
-          memset(iot_info, 0, 127);
+          memset(iot_info, 0, sizeof(iot_info));
           sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3320,0,5700,4,4,%d,0,0\r\n",MIPLOBSERVERSP_3320,BAT_Q);
           Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
           BAT_Q_LAST = BAT_Q;
@@ -296,19 +306,20 @@ int main(void)
         //GPS信息上传
         Set_Cmd2NB("AT+QGNSSRD=\"NMEA/GGA\"\r\n",23,"+QGNSSRD: $GNGGA");  //发送定位请求
         NB_Rec_Handle();  //处理返回的定位数据
+        // printf("299行:GPS_flag=%d,Latitude=%02.4f,Longitude=%03.4f,Altitude=%02.2f\r\n",GPS_flag,Latitude,Longitude,Altitude);
         if(GPS_flag)
         {
-          memset(iot_info, 0, 127);
+          memset(iot_info, 0,  sizeof(iot_info));
           memset(iot_info2, 0, 100);
           sprintf(iot_info2,"%02.4f",Latitude);
           sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5513,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen(iot_info2),iot_info2); //纬度
           Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
-          memset(iot_info, 0, 127);
+          memset(iot_info, 0,  sizeof(iot_info));
           memset(iot_info2, 0, 100);
           sprintf(iot_info2,"%03.4f",Longitude);
           sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5514,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen(iot_info2),iot_info2); //经度
           Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
-          memset(iot_info, 0, 127);
+          memset(iot_info, 0,  sizeof(iot_info));
           memset(iot_info2, 0, 100);
           sprintf(iot_info2,"%02.2f",Altitude);
           sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5515,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen(iot_info2),iot_info2); //海拔
@@ -674,6 +685,7 @@ void NB_Rec_Handle(void)
       }
       else if (strstr(temp,"3336"))
       {
+        // sprintf(iot_info,"AT+MIPLDISCOVERRSP=0,%s,1,19,\"5513;5514;5515;5750\"\r\n",MIPLDISCOVER); 
         sprintf(iot_info,"AT+MIPLDISCOVERRSP=0,%s,1,14,\"5513;5514;5515\"\r\n",MIPLDISCOVER); 
       }
       if(Set_Cmd2NB((uint8_t*)iot_info,strlen(iot_info),"OK") == 0) //使用资源 ID 列表响应发现资源请求。
@@ -684,10 +696,40 @@ void NB_Rec_Handle(void)
 
   if(strstr((const char*)Res1_Buf,"+QGNSSRD: $GNGGA"))
   {
-    printf("Res1_Buf[40]=%c\r\n",Res1_Buf[40]);
-    if(Res1_Buf[40] == 'N')
+    // memset(test,0,256);
+    // memset(Res1_Buf,0,sizeof(Res1_Buf));
+    // strcpy((char *)Res1_Buf,"\r\n+QGNSSRD: $GNGGA,025929.00,3155.9348,N,11715.7318,E,1,07,2.53,56.9,M,,M,,*6A\r\nOK\r\n");
+    // for(int i=0;i<sizeof(Res1_Buf);i++){
+    //   if(Res1_Buf[i]!='\r'&&Res1_Buf[i]!='\n')
+    //   {
+    //     test[i] = Res1_Buf[i];
+    //   }
+    //   else
+    //   {
+    //     test[i] = ' ';
+    //   }
+    // }
+    // for(int i = 0;i<8;i++)
+    // {
+    //   int j = i+35;
+    //   if(Res1_Buf[j]!='\r'&&Res1_Buf[j]!='\n'&&j<strlen((char *)Res1_Buf))
+    //   {
+    //     sprintf(iot_info2,"|Res1_Buf[%d]:%c",j,Res1_Buf[j]);
+    //   }
+    //   else
+    //   {
+    //     sprintf(iot_info2,"|Res1_Buf[%d]: ",j);
+    //   }
+    //   strcat((char *)test,(char *)iot_info2);
+    // }
+    // printf("test=%s\r\n",test);
+    // memset(iot_info, 0,  sizeof(iot_info));
+    // sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5750,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen((char *)test),(char *)test); //原始GPS信息上报
+    // printf("iot_info=%s\r\n",iot_info);
+    
+    if(Res1_Buf[39] == 'N')
     {
-      //+QGNSSRD: $GNGGA,021326.00,3155.9607,N,11715.6982,E,1,09,1.54,26.7,M,,M,,*6E
+      //+QGNSSRD: $GNGGA,025929.00,3155.9348,N,11715.7318,E,1,07,2.53,56.9,M,,M,,*6A
       uint8_t i = 0;
       char *temp = strtok((char *)Res1_Buf,",");
       while(temp)
@@ -695,16 +737,17 @@ void NB_Rec_Handle(void)
           if (i == 2)
           {
             Latitude = atof(temp);
-            Latitude = (uint8_t)Latitude/100 + (Latitude - (uint8_t)Latitude/100*100)/60;
+            Latitude = (int)Latitude/100 + (Latitude - (int)Latitude/100*100)/60;
           }
           else if (i == 4)
           {
             Longitude = atof(temp);
-            Longitude = (uint8_t)Longitude/100 + (Longitude - (uint8_t)Longitude/100*100)/60;
+            Longitude = (int)Longitude/100 + (Longitude - (int)Longitude/100*100)/60;
           }
           else if (i == 9)
           {
             Altitude = atof(temp);
+            printf("%02.2f",Altitude);
           }
 
           temp = strtok(NULL,",");
@@ -712,7 +755,7 @@ void NB_Rec_Handle(void)
       }
       GPS_flag = 1;
     }
-    else if (Res1_Buf[40] != 'N')
+    else if (Res1_Buf[39] != 'N')
     {
       Latitude = 0;
       Longitude = 0;
@@ -720,6 +763,8 @@ void NB_Rec_Handle(void)
       GPS_flag = 0;
       printf("GNSS信号差定位不成功\r\n");
     }
+
+    // Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
   }
   
 }
