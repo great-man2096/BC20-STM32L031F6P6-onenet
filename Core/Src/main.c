@@ -70,16 +70,21 @@ uint16_t VREFINT_CAL;
 uint16_t VREFINT_DATA;
 float VDDA_Value;
 
-uint32_t main_count = 25000;
+uint32_t main_count = 3000;
 uint8_t i = 0;
 uint8_t NB_SINGAL_VALUE = 0;
 float Latitude;
 float Longitude;
 float Altitude;
 
-bool iot_flag = false;
+char MIPLOBSERVERSP[50];
+int MIPLOBSERVERSP_3320;
+int MIPLOBSERVERSP_3336;
+char * MIPLDISCOVER;
+uint8_t iot_flag = 0;
+uint8_t GPS_flag = 0;
 char iot_info[127];
-char iot_info2[127];
+char iot_info2[100];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -196,10 +201,10 @@ int main(void)
   }
   printf("GNSS电源已打开\r\n");
 
-  // Set_Cmd2NB("AT+QLWSERV=\"221.229.214.202\",5683\r\n",35,"OK");  //设置电信 loT 平台 IP 地址和端口。
-  // Set_Cmd2NB("AT+QLWCONF=\"862177041550669\"\r\n",30,"OK"); //设置连接到电信 loT 平台设备的 IMEI 号。
-  // Set_Cmd2NB("AT+QLWADDOBJ=19,0,1,\"0\"\r\n",25,"OK");  //添加 LwM2M 对象 19/0/0。
-  // Set_Cmd2NB("AT+QLWOPEN=0\r\n",14,"OK"); //以直吐模式注册到电信 loT 平台。
+  Set_Cmd2NB("AT+MIPLCREATE\r\n",15,"+MIPLCREATE: 0");  //创建通信套件实例。
+  Set_Cmd2NB("AT+MIPLADDOBJ=0,3320,1,\"1\",1,0\r\n",32,"OK"); //添加 LwM2M 对象。
+  Set_Cmd2NB("AT+MIPLADDOBJ=0,3336,1,\"1\",3,0\r\n",32,"OK"); //添加 LwM2M 对象。
+  Set_Cmd2NB("AT+MIPLOPEN=0,86400\r\n",21,"OK");  //向 OneNET 发送注册请求。
 
 
   Set_Cmd2NB("AT+QSCLK=0\r\n", 12, "OK"); //关闭休眠模式
@@ -238,7 +243,7 @@ int main(void)
       Res1_Sign = 0;
       HAL_UART_Transmit(&huart2, Res1_Buf, Res1_Count, 1000); //把接收到的数据发送给USB串口
       Res1_Count = 0;
-      // NB_Rec_Handle();
+      NB_Rec_Handle();
     }
     
     /* USER CODE END WHILE */
@@ -253,9 +258,9 @@ int main(void)
 
     HAL_Delay(1);
     main_count++;
-    if (main_count > 30000)
+    if (main_count > 5000)
     {
-      // if (iot_flag)
+      if (iot_flag == 4)
       {
         main_count = 0;
         Get_BAT_Value();
@@ -279,25 +284,36 @@ int main(void)
           BAT_Q = 100 - (4.1 - BAT_VALUE) * (100/(4.1-3.0));
         }
         
-        // printf("发送定位请求,返回代码值:%d\r\n",Set_Cmd2NB("AT+QGNSSRD=\"NMEA/GGA\"\r\n",23,"+QGNSSRD: $GNGGA"));
-        // // Set_Cmd2NB("AT+QGNSSRD=\"NMEA/GGA\"\r\n",23,"+QGNSSRD: $GNGGA");  //发送定位请求
-        // printf("处理返回数据:->%s<-\r\n",Res1_Buf);
-        // NB_Rec_Handle();  //处理返回数据
-        // printf("处理返回数据结束\r\n");
-
-
-        // memset(iot_info, 0, 127);
         // memset(iot_info2, 0, 127);
-        // if (BAT_Q_LAST != BAT_Q)
-        // {
-        //   sprintf(iot_info,"AT+QLWDATASEND=889,0,0,%d,\"%s\",0x0000\r\n",sizeof(BAT_Q),BAT_Q);
-        //   Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
-        //   BAT_Q_LAST = BAT_Q;
-        // }
-        
-        // sprintf(iot_info,"Lat=%.4f,Lon=%.4f,Alt=%.2f,BAT_Q=%d",Latitude,Longitude,Altitude,BAT_Q);
-        // sprintf(iot_info2,"AT+QLWDATASEND=19,0,0,%d,\"%s\",0x0000\r\n",strlen(iot_info),iot_info);
-        // Set_Cmd2NB((uint8_t *)iot_info2,strlen(iot_info2),"OK");
+        //电池电量变化上传
+        if (BAT_Q_LAST != BAT_Q)
+        {
+          memset(iot_info, 0, 127);
+          sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3320,0,5700,4,4,%d,0,0\r\n",MIPLOBSERVERSP_3320,BAT_Q);
+          Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
+          BAT_Q_LAST = BAT_Q;
+        }
+        //GPS信息上传
+        Set_Cmd2NB("AT+QGNSSRD=\"NMEA/GGA\"\r\n",23,"+QGNSSRD: $GNGGA");  //发送定位请求
+        NB_Rec_Handle();  //处理返回的定位数据
+        if(GPS_flag)
+        {
+          memset(iot_info, 0, 127);
+          memset(iot_info2, 0, 100);
+          sprintf(iot_info2,"%02.4f",Latitude);
+          sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5513,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen(iot_info2),iot_info2); //纬度
+          Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
+          memset(iot_info, 0, 127);
+          memset(iot_info2, 0, 100);
+          sprintf(iot_info2,"%03.4f",Longitude);
+          sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5514,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen(iot_info2),iot_info2); //经度
+          Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
+          memset(iot_info, 0, 127);
+          memset(iot_info2, 0, 100);
+          sprintf(iot_info2,"%02.2f",Altitude);
+          sprintf(iot_info,"AT+MIPLNOTIFY=0,%d,3336,0,5515,1,%d,\"%s\",0,0\r\n",MIPLOBSERVERSP_3336,strlen(iot_info2),iot_info2); //海拔
+          Set_Cmd2NB((uint8_t *)iot_info,strlen(iot_info),"OK");
+        }
       }
     }
    
@@ -622,50 +638,90 @@ uint8_t Set_Cmd2NB(uint8_t *cmd, uint8_t len, char *recdata)
  */
 void NB_Rec_Handle(void)
 {
-  if((!iot_flag) && (strstr((const char*)Res1_Buf,"+QLWOBSERVE: 0,19,0,0")))  //接收订阅成功（19/0/0）请求。
+  if (iot_flag != 4)
   {
-    iot_flag = true;
-    while(Set_Cmd2NB("AT+QGNSSC?\r\n",12,"+QGNSSC: 1")  != 0)  //检测GNSS状态
+    if(strstr((const char*)Res1_Buf,"+MIPLOBSERVE"))  //接收到订阅请求。
     {
-      Set_Cmd2NB("AT+QGNSSC=1\r\n",13,"OK");  //开启GNSS
-        HAL_Delay(1000);
+      char *temp = strtok((char *)Res1_Buf,",");
+      temp = strtok(NULL,",");
+      strcpy(MIPLOBSERVERSP,temp);
+      temp = strtok(NULL,",");
+      temp = strtok(NULL,",");
+      if (strstr(temp,"3320"))
+      {
+        MIPLOBSERVERSP_3320 = atoi(MIPLOBSERVERSP);
+      }
+      else if (strstr(temp,"3336"))
+      {
+        MIPLOBSERVERSP_3336 = atoi(MIPLOBSERVERSP);
+      }
+      printf("接收订阅请求的数据：MIPLOBSERVERSP=%s\r\n",MIPLOBSERVERSP);
+      memset(iot_info,0,sizeof(iot_info));
+      sprintf(iot_info,"AT+MIPLOBSERVERSP=0,%s,1\r\n",MIPLOBSERVERSP);
+      if(Set_Cmd2NB((uint8_t*)iot_info,strlen(iot_info),"OK") == 0) //响应订阅请求，其结果码为 1。
+        iot_flag++;
     }
-    printf("开启GNSS成功\r\n");
-  }
-
-  if((strstr((const char*)Res1_Buf,"+QGNSSRD: $GNGGA")) && (Res1_Buf[19] != ','))
-  {
-    //+QGNSSRD: $GNGGA,021326.00,3155.9607,N,11715.6982,E,1,09,1.54,26.7,M,,M,,*6E
-    uint8_t i = 0;
-    char *temp = strtok((char *)Res1_Buf,",");
-    while(temp)
+    else if(strstr((const char*)Res1_Buf,"+MIPLDISCOVER"))  //接收到发现资源请求。
     {
-        if (i == 2)
-        {
-          Latitude = atof(temp);
-          Latitude = (uint8_t)Latitude/100 + (Latitude - (uint8_t)Latitude/100*100)/60;
-        }
-        else if (i == 4)
-        {
-          Longitude = atof(temp);
-          Longitude = (uint8_t)Longitude/100 + (Longitude - (uint8_t)Longitude/100*100)/60;
-        }
-        else if (i == 9)
-        {
-          Altitude = atof(temp);
-        }
-
-        temp = strtok(NULL,",");
-        i++;
+      char *temp = strtok((char *)Res1_Buf,",");
+      temp = strtok(NULL,",");
+      MIPLDISCOVER = temp;
+      temp = strtok(NULL,",");
+      memset(iot_info,0,sizeof(iot_info));
+      if(strstr(temp,"3320"))
+      {
+        sprintf(iot_info,"AT+MIPLDISCOVERRSP=0,%s,1,4,\"5700\"\r\n",MIPLDISCOVER); 
+      }
+      else if (strstr(temp,"3336"))
+      {
+        sprintf(iot_info,"AT+MIPLDISCOVERRSP=0,%s,1,14,\"5513;5514;5515\"\r\n",MIPLDISCOVER); 
+      }
+      if(Set_Cmd2NB((uint8_t*)iot_info,strlen(iot_info),"OK") == 0) //使用资源 ID 列表响应发现资源请求。
+        iot_flag++;
     }
   }
-  else if ((strstr((const char*)Res1_Buf,"+QGNSSRD: $GNGGA")) && (Res1_Buf[19] == ','))
+  
+
+  if(strstr((const char*)Res1_Buf,"+QGNSSRD: $GNGGA"))
   {
-    Latitude = 0;
-    Longitude = 0;
-    Altitude = 0;
-    printf("GNSS信号差定位不成功\r\n");
+    printf("Res1_Buf[40]=%c\r\n",Res1_Buf[40]);
+    if(Res1_Buf[40] == 'N')
+    {
+      //+QGNSSRD: $GNGGA,021326.00,3155.9607,N,11715.6982,E,1,09,1.54,26.7,M,,M,,*6E
+      uint8_t i = 0;
+      char *temp = strtok((char *)Res1_Buf,",");
+      while(temp)
+      {
+          if (i == 2)
+          {
+            Latitude = atof(temp);
+            Latitude = (uint8_t)Latitude/100 + (Latitude - (uint8_t)Latitude/100*100)/60;
+          }
+          else if (i == 4)
+          {
+            Longitude = atof(temp);
+            Longitude = (uint8_t)Longitude/100 + (Longitude - (uint8_t)Longitude/100*100)/60;
+          }
+          else if (i == 9)
+          {
+            Altitude = atof(temp);
+          }
+
+          temp = strtok(NULL,",");
+          i++;
+      }
+      GPS_flag = 1;
+    }
+    else if (Res1_Buf[40] != 'N')
+    {
+      Latitude = 0;
+      Longitude = 0;
+      Altitude = 0;
+      GPS_flag = 0;
+      printf("GNSS信号差定位不成功\r\n");
+    }
   }
+  
 }
 /* USER CODE END 4 */
 
